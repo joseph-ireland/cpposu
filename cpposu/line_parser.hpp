@@ -66,13 +66,21 @@ inline std::optional<std::string_view> try_take_column(std::string_view& data, c
 }
 
 
-struct LineParser
+class LineParser
 {
+    void init() 
+    {
+        if (!stream_)
+            CPPOSU_RAISE_PARSE_ERROR("Failed to open file");
+
+        line_data_.reserve(1024);
+    }
+public:
     LineParser(std::istream& stream, std::string filename="<unknown>"):
         stream_(stream),
         filename_(filename)
     {
-        line_data_.reserve(1024);
+        init();
     }
 
     LineParser(std::string filename):
@@ -80,7 +88,7 @@ struct LineParser
         stream_(*fstream_),
         filename_(filename)
     {
-        line_data_.reserve(1024);
+        init();
     }
 
 
@@ -117,6 +125,11 @@ struct LineParser
                 return line;
         }
         return {};
+    }
+
+    std::string_view reread_last_line()
+    {
+        return trim_space(line_data_);
     }
 
     template<typename T=double>
@@ -159,6 +172,15 @@ struct LineParser
         }
         return {};
     }
+    template<typename T=double>
+    bool try_take_numeric_column(T& value, std::string_view& line, char delimiter=',')
+    {
+        auto optional_value = try_take_numeric_column(line, delimiter);
+        if (optional_value)
+            value = *optional_value;
+        return optional_value.has_value();
+    }
+
 
 
     template<typename T=double>
