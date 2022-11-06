@@ -6,6 +6,9 @@
 #include <optional>
 #include <unordered_map>
 #include <iostream>
+#include <memory>
+#include <span>
+#include <array>
 
 namespace cpposu {
 
@@ -66,7 +69,12 @@ struct TimingPoints
     std::vector<TimingPoint> points;
     size_t nextIndex=0;
     double currentBeatLength=0;
-    double currentSliderVelocity=1;
+    double currentSliderVelocityMultiplier=100;
+    double baseSliderVelocity=1;
+    double sliderTickRate=1;
+
+    double tickDistance() { return currentSliderVelocityMultiplier * baseSliderVelocity / sliderTickRate; }
+    double tickDuration() { return currentBeatLength / sliderTickRate; }
     void advanceTime(uint64_t time)
     {
         while(nextIndex < points.size() && points[nextIndex].time < time)
@@ -76,7 +84,7 @@ struct TimingPoints
             if (points[currentIndex].uninherited)
                 currentBeatLength = points[currentIndex].beatLength;
             else
-                currentSliderVelocity = -0.01 * points[currentIndex].beatLength;
+                currentSliderVelocityMultiplier = - points[currentIndex].beatLength;
         }
     }
 };
@@ -92,7 +100,7 @@ struct HitObject
 {
     HitObjectType type;
         
-    int x, y, time;
+    float x, y, time;
     auto operator <=>(const HitObject&) const = default;
 };
 
@@ -110,5 +118,51 @@ struct Beatmap
     TimingPoints timing_points;
     std::vector<HitObject> hit_objects;
 };
+
+struct Vector2 {
+    float X,Y;
+
+    Vector2 operator-() const { return {-X, -Y}; }
+    Vector2 operator+(Vector2 b) const { return {X+b.X, Y+b.Y}; }
+    Vector2 operator-(Vector2 b) const { return {X-b.X, Y-b.Y}; }
+    Vector2 operator/(float a) const { return {X/a, Y/a}; }
+    Vector2 operator*(float a) const  { return {a*X, a*Y}; }
+    friend Vector2 operator*(float a, Vector2 b)  { return b*a; }
+    friend Vector2 lerp(Vector2 a, Vector2 b, float t) { return (1-t)*a + t*b; }
+
+    float squared_length() { return X*X+Y*Y; }
+    float length() { return std::sqrtf(squared_length()); }
+
+    float dot(const Vector2& other) { return X*other.X + Y*other.Y; }
+
+    auto operator<=>(const Vector2&) const = default;
+};
+
+template <typename T, size_t N=1024>
+class Arena
+{
+    std::array<T,N> data;
+    size_t index=0;
+    void grow()
+    {
+        last->next = std::make_unique<Arena>();
+        last = last->next.get();
+    }
+    std::unique_ptr<Arena> next;
+    Arena* last = this;
+public:
+    std::span<T> take(size_t n)
+    {
+        if (last->index+n>=N) [[unlikely]] 
+        {
+            if (n >= N) throw std::runtime_error("Overflow arena"); 
+            grow(); 
+        }
+        std::span<T> result{&last->data[last->index], n};
+        last->index += n;
+        return result;
+    }
+};
+
 
 }

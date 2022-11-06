@@ -38,16 +38,19 @@ TEST_CASE("Basic parsing", "[line_parser]")
     CHECK(line == "testing123,  strip me ,don't strip");
     CHECK(parser.take_column(line) == "testing123");
     CHECK(parser.take_column(line) == "strip me");
+    CHECK(cpposu::try_take_column(line) == "don't strip");
+    CHECK(line == "");
     CHECK(!cpposu::try_take_column(line));
-    CHECK(line == "don't strip");
+
     
     line = parser.read_line();
     CHECK(line == "don't strip, strip me");
     auto first_column = cpposu::try_take_column(line);
     CHECK(bool(first_column));
     CHECK(first_column.value() == "don't strip");
-    CHECK(!cpposu::try_take_column(line));
     CHECK(line == "strip me");
+    CHECK(cpposu::try_take_column(line)=="strip me");
+    CHECK(line.empty());
 }
 static constexpr char numeric_test_config[]=
 R"(     
@@ -85,9 +88,9 @@ TEST_CASE("Numeric parsing", "[line_parser]")
     CHECK(parser.take_numeric_column<float>(semicolon_list) == 5.0);
     CHECK(semicolon_list == "");
 
-    CHECK(parser.try_take_numeric_column(line) == 6);
-    CHECK(parser.try_take_numeric_column(line) == 7.0);
+    CHECK(cpposu::try_take_numeric_column(line) == 6);
+    CHECK(cpposu::try_take_numeric_column(line) == 7.0);
     CHECK(line == "");
-    CHECK(parser.try_take_numeric_column(line) == std::nullopt);
+    CHECK(cpposu::try_take_numeric_column(line) == std::nullopt);
     CHECK(line == "");
 }

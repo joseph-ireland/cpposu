@@ -1,3 +1,5 @@
+#pragma once
+
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
@@ -51,19 +53,70 @@ inline bool try_take_prefix(std::string_view& data, std::string_view prefix)
     return false;
 }
 
-/// only succeeds if it can find a delimiter, so can't be used for the "final" column 
-inline std::optional<std::string_view> try_take_column(std::string_view& data, char delimiter=',')
-/// (otherwise empty columns would be impossible to detect even if potentially valid)
+inline std::optional<std::string_view> try_take_column(std::string_view& data, char delimiter=',', bool allow_empty=false)
 {
     size_t pos=data.find_first_of(delimiter);
     if (pos == std::string_view::npos)
-        return {};
+    {
+        if (allow_empty || !data.empty())
+        {
+            std::string_view result = data;
+            data = {};
+            return result;
+        }
+        else
+            return {};
+    }
     
     std::string_view result = trim_space(data.substr(0,pos));
     data.remove_prefix(pos+1);
     data = trim_leading_space(data);
     return result;
 }
+
+template<typename T=double>
+std::optional<T> try_take_number(std::string_view& line)
+{
+    T result;
+    auto [next, ec] = std::from_chars(line.data(), line.data()+line.size(), result);
+    if (ec != std::errc{})
+    {
+        return {}; 
+    }
+    line = line.substr(next-line.data());
+    line = trim_leading_space(line);
+    return result;
+}
+template<typename T>
+bool try_take_number(T& result, std::string_view& line)
+{
+    auto x = try_take_number<T>(line);
+    if (x)
+        result = *x;
+
+    return x;
+}
+template<typename T=double>
+std::optional<T> try_take_numeric_column(std::string_view& line, char delimiter=',')
+{
+    if (!line.empty())
+    {
+        auto result = try_take_number<T>(line);
+        try_take_column(line, delimiter);
+        return result;
+    }
+    return {};
+}
+template<typename T=double>
+bool try_take_numeric_column(T& value, std::string_view& line, char delimiter=',')
+{
+    auto optional_value = try_take_numeric_column(line, delimiter);
+    if (optional_value)
+        value = *optional_value;
+    return optional_value.has_value();
+}
+
+
 
 
 class LineParser
@@ -135,15 +188,10 @@ public:
     template<typename T=double>
     T take_number(std::string_view& line)
     {
-        T result;
-        auto [next, ec] = std::from_chars(line.data(), line.data()+line.size(), result);
-        if (ec != std::errc{})
-        {
-            CPPOSU_RAISE_PARSE_ERROR("failed to read number: " << debug_location(line)); 
-        }
-        line = line.substr(next-line.data());
-        line = trim_leading_space(line);
-        return result;
+        auto result = try_take_number<T>(line);
+        if (result) return *result;
+        
+        CPPOSU_RAISE_PARSE_ERROR("failed to read number: " << debug_location(line)); 
     }
     template<typename T>
     void take_number(T& result, std::string_view& line)
@@ -151,38 +199,15 @@ public:
         result = take_number<T>(line);
     }
 
-    /// always removes a column and delimiter - note this means it can't be used for a final column (otherwise impossible to detect empty columns)
-    std::string_view take_column(std::string_view& data, char delimiter=',')
+    std::string_view take_column(std::string_view& data, char delimiter=',', bool allow_empty=false)
     {
-        auto column = try_take_column(data, delimiter);
+        auto column = try_take_column(data, delimiter, allow_empty);
         if (!column)
             CPPOSU_RAISE_PARSE_ERROR("expected delimiter '" << delimiter << "' at " << debug_location(data));
         return *column;
     }
 
-    /// contrary to above - this also allows taking the last column for ease of use, since a final empty column would be invalid anyway
-    template<typename T=double>
-    std::optional<T> try_take_numeric_column(std::string_view& line, char delimiter=',')
-    {
-        if (!line.empty())
-        {
-            auto result = take_number<T>(line);
-            try_take_column(line, delimiter);
-            return result;
-        }
-        return {};
-    }
-    template<typename T=double>
-    bool try_take_numeric_column(T& value, std::string_view& line, char delimiter=',')
-    {
-        auto optional_value = try_take_numeric_column(line, delimiter);
-        if (optional_value)
-            value = *optional_value;
-        return optional_value.has_value();
-    }
-
-
-
+    /// works for last column since umpty column would be invalid
     template<typename T=double>
     T take_numeric_column(std::string_view& line, char delimiter=',')
     {
@@ -192,7 +217,6 @@ public:
             CPPOSU_RAISE_PARSE_ERROR("Expected number: " << d);
         return *column;
     }
-
 
     template<typename T=double>
     void take_numeric_column(T& result, std::string_view& line, char delimiter=',')

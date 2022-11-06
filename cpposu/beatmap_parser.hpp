@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cpposu/slider.hpp>
 #include <cpposu/line_parser.hpp>
 #include <cpposu/types.hpp>
 
@@ -21,6 +22,7 @@ struct BeatmapParser : LineParser
     using LineParser::LineParser;
 
     Beatmap parse();
+
 
 protected:
 
@@ -75,21 +77,45 @@ protected:
         });
     }
 
-    void parse_spinner(HitObject spinner_start, std::string_view line)
+    void parse_spinner(HitObject spinner_start, std::string_view extras)
     {
         HitObject spinner_end = spinner_start;
         spinner_start.type = HitObjectType::spinner_start;
         spinner_end.type = HitObjectType::spinner_end;
-        take_numeric_column(spinner_end.time, line);
+        take_numeric_column(spinner_end.time, extras);
         beatmap_.hit_objects.push_back(spinner_start);
         beatmap_.hit_objects.push_back(spinner_end);
     }
 
-    void parse_slider(HitObject slider_head, std::string_view line)
+    void parse_slider(HitObject slider_head, std::string_view extras)
     {
-        // TODO sliders
         slider_head.type = HitObjectType::slider_head;
-        beatmap_.hit_objects.push_back(slider_head);
+        slider_data_.slider_head = slider_head;
+
+        std::string_view path_data = take_column(extras);
+
+        slider_data_.slide_count = take_numeric_column<int>(extras);
+        slider_data_.length = take_numeric_column<double>(extras);
+
+        auto slider_type_str = take_column(path_data,'|');
+        std::optional<slider_type> slider_type = try_parse_slider_type(slider_type_str);
+
+        if (!slider_type) CPPOSU_RAISE_PARSE_ERROR("invalid slider type: " << slider_type_str);
+
+        slider_data_.type = *slider_type;
+        slider_data_.control_points.clear();
+        slider_data_.control_points.push_back({float(slider_head.x), float(slider_head.y)});
+        while(std::optional<std::string_view> control_point_str = try_take_column(path_data, '|'))
+        {
+            Vector2 p;
+            take_numeric_column(p.X, *control_point_str, ':');
+            take_number(p.Y, *control_point_str);
+            slider_data_.control_points.push_back(p);
+        }
+        generate_slider_hit_objects(slider_data_, beatmap_.timing_points, [this](auto&& ho){
+            beatmap_.hit_objects.push_back(ho);
+        });
+
     }
 
     void parse_metadata(std::string_view first_line);
@@ -108,6 +134,8 @@ protected:
             CPPOSU_DIFFICULTY_VAR(SliderTickRate);
         });
         #undef CPPOSU_DIFFICULTY_VAR
+        
+        beatmap_.timing_points.baseSliderVelocity = beatmap_.difficulty_attributes.SliderMultiplier;
     }
 
     void parse_timing_points(std::string_view first_line)
@@ -138,6 +166,7 @@ protected:
     }
 
     Beatmap beatmap_;
+    slider_data slider_data_;
 
 };
 
