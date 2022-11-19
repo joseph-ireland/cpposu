@@ -222,24 +222,34 @@ namespace cpposu
     struct CircularArc
     {
         Vector2 Centre;
-        float Radius, ThetaStart, Direction, ThetaRange;
+        float Radius, ThetaStart, ThetaRange, AmountPoints, Direction, LengthToAngleMultiplier;
 
         Vector2 value_at(float distance)
         {
-            float theta = ThetaStart + Direction * distance/Radius;
-            return Centre + Radius * Vector2{std::cos(theta), std::sin(theta)};
+            float theta = distance * LengthToAngleMultiplier;
+            float theta_inc = Direction*ThetaRange/(AmountPoints-1);
+            float theta_0 = theta_inc*std::min(std::floor(theta/theta_inc), AmountPoints-2);
+            float theta_1 = theta_0+theta_inc;
+            float t = (theta-theta_0)/theta_inc;
+
+            theta_0 += ThetaStart;
+            theta_1 += ThetaStart;
+
+            auto point_0 = Centre + Radius * Vector2{std::cos(theta_0), std::sin(theta_0)};
+            auto point_1 = Centre + Radius * Vector2{std::cos(theta_1), std::sin(theta_1)};
+            return lerp(point_0, point_1, t);
         }
 
         static std::optional<CircularArc> fromControlPoints(std::span<const Vector2> controlPoints)
         {
-            if (controlPoints.size() < 3) throw std::runtime_error("not enough circle control points");
+            if (controlPoints.size() < 3) return {};
 
             Vector2 a = controlPoints[0];
             Vector2 b = controlPoints[1];
             Vector2 c = controlPoints[2];
 
             // If we have a degenerate triangle where a side-length is almost zero, then give up and fallback to a more numerically stable method.
-            if ((b.Y - a.Y) * (c.X - a.X) - (b.X - a.X) * (c.Y - a.Y) < 1e-8)
+            if (std::abs((b.Y - a.Y) * (c.X - a.X) - (b.X - a.X) * (c.Y - a.Y)) < 1e-8)
             {
                 return {};
             }
@@ -261,14 +271,16 @@ namespace cpposu
 
             result.Radius = dA.length();
 
-            result.ThetaStart = std::atan2f(dA.Y, dA.X);
-            float thetaEnd = std::atan2f(dC.Y, dC.X);
+            result.ThetaStart = std::atan2(dA.Y, dA.X);
+
+            result.Direction = 1;
+            float thetaEnd = std::atan2(dC.Y, dC.X);
 
             while (thetaEnd < result.ThetaStart)
                 thetaEnd += 2 * std::numbers::pi;
 
-            result.Direction = 1;
             result.ThetaRange = thetaEnd - result.ThetaStart;
+
 
             // Decide in which direction to draw the circle, depending on which side of
             // AC B lies.
@@ -280,9 +292,25 @@ namespace cpposu
                 result.Direction = -1;
                 result.ThetaRange = 2 * std::numbers::pi - result.ThetaRange;
             }
+
+            result.LengthToAngleMultiplier = result.Direction / result.Radius;
+
+            // osu! approximates circles as linear segments with below tolerance
+            // This makes the overall path shorter
+            constexpr double circular_arc_tolerance = 0.1;
+            if (circular_arc_tolerance < 2*result.Radius)
+            {
+                result.AmountPoints = std::max(2.0,std::ceil(result.ThetaRange / (2*std::acos(1 - circular_arc_tolerance / result.Radius))));
+            }
+            else  {
+                result.AmountPoints = 2;
+            }
+            double alpha = result.ThetaRange / (2*(result.AmountPoints-1));
+
+            result.LengthToAngleMultiplier *= alpha/std::sin(alpha);
+
             return result;
         }
 
     };
-
 }

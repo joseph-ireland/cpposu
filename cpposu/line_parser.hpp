@@ -53,44 +53,41 @@ inline bool try_take_prefix(std::string_view& data, std::string_view prefix)
     return false;
 }
 
-inline std::optional<std::string_view> try_take_column(std::string_view& data, char delimiter=',', bool allow_empty=false)
+inline std::optional<std::string_view> try_take_column(std::string_view& data, char delimiter=',')
 {
     size_t pos=data.find_first_of(delimiter);
     if (pos == std::string_view::npos)
     {
-        if (allow_empty || !data.empty())
-        {
-            std::string_view result = data;
-            data = {};
-            return result;
-        }
-        else
-            return {};
+        // note: different to data.empty()
+        // This won't be true if data.remove_prefix() leaves an empty string.
+        // it's only true if the pointer is explicitly nulled - allows detecting empty last column.
+        if (!data.data()) return {};
+        std::string_view result = data;
+        data = {};
+        return trim_space(result);
     }
-    
+
     std::string_view result = trim_space(data.substr(0,pos));
     data.remove_prefix(pos+1);
-    data = trim_leading_space(data);
     return result;
 }
 
 template<typename T=double>
-std::optional<T> try_take_number(std::string_view& line)
+std::optional<T> read_number(std::string_view& str)
 {
     T result;
-    auto [next, ec] = std::from_chars(line.data(), line.data()+line.size(), result);
+    auto [next, ec] = std::from_chars(str.data(), str.data()+str.size(), result);
     if (ec != std::errc{})
     {
-        return {}; 
+        return {};
     }
-    line = line.substr(next-line.data());
-    line = trim_leading_space(line);
     return result;
 }
+
 template<typename T>
-bool try_take_number(T& result, std::string_view& line)
+[[nodiscard]] bool read_number(T& result, std::string_view& str)
 {
-    auto x = try_take_number<T>(line);
+    auto x = read_number<T>(str);
     if (x)
         result = *x;
 
@@ -99,16 +96,12 @@ bool try_take_number(T& result, std::string_view& line)
 template<typename T=double>
 std::optional<T> try_take_numeric_column(std::string_view& line, char delimiter=',')
 {
-    if (!line.empty())
-    {
-        auto result = try_take_number<T>(line);
-        try_take_column(line, delimiter);
-        return result;
-    }
-    return {};
+    auto str = try_take_column(line, delimiter);
+    if (!str) return {};
+    return read_number<T>(*str);
 }
 template<typename T=double>
-bool try_take_numeric_column(T& value, std::string_view& line, char delimiter=',')
+[[nodiscard]] bool try_take_numeric_column(T& value, std::string_view& line, char delimiter=',')
 {
     auto optional_value = try_take_numeric_column(line, delimiter);
     if (optional_value)
@@ -121,7 +114,7 @@ bool try_take_numeric_column(T& value, std::string_view& line, char delimiter=',
 
 class LineParser
 {
-    void init() 
+    void init()
     {
         if (!stream_)
             CPPOSU_RAISE_PARSE_ERROR("Failed to open file");
@@ -137,7 +130,7 @@ public:
     }
 
     LineParser(std::string filename):
-        fstream_(std::make_unique<std::fstream>(filename)),
+        fstream_(std::make_unique<std::ifstream>(filename)),
         stream_(*fstream_),
         filename_(filename)
     {
@@ -145,7 +138,7 @@ public:
     }
 
 
-    std::unique_ptr<std::fstream> fstream_;
+    std::unique_ptr<std::ifstream> fstream_;
     std::istream& stream_;
     std::string filename_;
     std::string line_data_;
@@ -157,13 +150,16 @@ public:
         size_t error_index;
         friend std::ostream& operator<<(std::ostream& os, const DebugLocation& d)
         {
-            return os << "\n\n    " << d.line << "\n    " << std::string(d.error_index, ' ') << "^\n";
+            os << "\n\n    "<< d.line << "\n    ";
+            if (d.error_index <= d.line.size())
+                return  os<< std::string(d.error_index, ' ') << "^\n";
+            else
+                return os << "^ INVALID ERROR INDEX " << d.error_index <<"\n";
         }
     };
     DebugLocation debug_location(const std::string_view& data)
     {
-        size_t index = (data.data()-line_data_.data());
-        if (index > line_data_.size()) index=0; // prevents crash if we're somehow out of bounds, e.g. if data is empty/doesn't reference current line
+        size_t index = data.data() ? (data.data()-line_data_.data()) : line_data_.size();
         return DebugLocation{line_data_, index};
     }
 
@@ -186,36 +182,32 @@ public:
     }
 
     template<typename T=double>
-    T take_number(std::string_view& line)
+    T read_number_or_throw(std::string_view& line)
     {
-        auto result = try_take_number<T>(line);
+        auto result = read_number<T>(line);
         if (result) return *result;
-        
-        CPPOSU_RAISE_PARSE_ERROR("failed to read number: " << debug_location(line)); 
+
+        CPPOSU_RAISE_PARSE_ERROR("failed to read number: " << debug_location(line));
     }
     template<typename T>
-    void take_number(T& result, std::string_view& line)
+    void read_number_or_throw(T& result, std::string_view& line)
     {
-        result = take_number<T>(line);
+        result = read_number_or_throw<T>(line);
     }
 
-    std::string_view take_column(std::string_view& data, char delimiter=',', bool allow_empty=false)
+    std::string_view take_column(std::string_view& data, char delimiter=',')
     {
-        auto column = try_take_column(data, delimiter, allow_empty);
+        auto column = try_take_column(data, delimiter);
         if (!column)
             CPPOSU_RAISE_PARSE_ERROR("expected delimiter '" << delimiter << "' at " << debug_location(data));
         return *column;
     }
 
-    /// works for last column since umpty column would be invalid
     template<typename T=double>
     T take_numeric_column(std::string_view& line, char delimiter=',')
     {
-        auto d = debug_location(line);
-        auto column = try_take_numeric_column<T>(line, delimiter);
-        if (!column)
-            CPPOSU_RAISE_PARSE_ERROR("Expected number: " << d);
-        return *column;
+        auto column = take_column(line,delimiter);
+        return read_number_or_throw(column);
     }
 
     template<typename T=double>

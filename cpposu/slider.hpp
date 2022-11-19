@@ -1,5 +1,7 @@
 #pragma once
 
+
+
 #include "cpposu/path.hpp"
 #include "cpposu/slider.hpp"
 #include <cmath>
@@ -38,6 +40,7 @@ inline std::optional<slider_type> try_parse_slider_type(std::string_view s)
     }
 }
 
+
 struct slider_data
 {
     HitObject slider_head;
@@ -45,6 +48,7 @@ struct slider_data
     std::vector<Vector2> control_points;
     int slide_count;
     double length;
+
 };
 
 
@@ -57,45 +61,103 @@ struct SliderTick
 struct SliderPathTicks
 {
     std::vector<SliderTick> ticks;
+    SliderTick legacyLastTick;
 };
 
+struct LegacyLastTickEvent
+{
+    double distance, time;
 
-inline SliderPathTicks calculate_ticks(const std::vector<Vector2>& path, double slider_length, double tick_distance, double tick_duration)
+
+    LegacyLastTickEvent(const slider_data& data, double tick_distance, double tick_duration)
+    {
+        constexpr double legacy_last_tick_offset = 36.0;
+        double spanDuration = data.length * tick_duration/tick_distance;
+        int finalSpanIndex = data.slide_count - 1;
+        double finalSpanStartTime = finalSpanIndex * spanDuration;
+        double totalDuration = data.slide_count * spanDuration;
+        double finalSpanEndTime = std::max(totalDuration / 2, (finalSpanStartTime + spanDuration) - legacy_last_tick_offset);
+        double finalProgress = std::clamp((finalSpanEndTime - finalSpanStartTime) / spanDuration, 0.0, 1.0);
+        if (data.slide_count % 2 == 0) finalProgress = 1 - finalProgress;
+
+        double endTimeMin = finalSpanEndTime / spanDuration;
+        if (std::fmod(endTimeMin, 2) >= 1)
+            endTimeMin = 1 - std::fmod(endTimeMin, 1);
+        else
+            endTimeMin = std::fmod(endTimeMin, 1);
+
+
+        distance = endTimeMin*data.length;
+        time = finalSpanEndTime;
+    }
+};
+inline SliderPathTicks calculate_ticks(const std::vector<Vector2>& path, const slider_data& data, double tick_distance, double tick_duration)
 {
     SliderPathTicks result;
     result.ticks.push_back({0, path[0]});
-    float nextTick = tick_distance;
-    double nextTime=tick_duration;
 
-    float currentLength=0;
-    bool sliderEnd = false;
+    const double min_distance_from_end = 10 * tick_distance/tick_duration;
+    const double slider_length = data.length;
+
+    const LegacyLastTickEvent legacy_last_tick(data,tick_distance,tick_duration);
+
+
+    double nextTick = tick_distance;
+    double nextTime = tick_duration;
+
+    bool end = false;
+    bool have_legacy_last_tick = false;
+
+    auto check_slider_end = [&] {
+        if (nextTick + min_distance_from_end >= slider_length)
+        {
+            nextTick = slider_length;
+            nextTime = data.length * tick_duration/tick_distance;
+            end = true;
+        }
+    };
+
+    check_slider_end();
+
+
+    double currentLength=0;
     for (int i=1, last=path.size()-1; i<=last; ++i)
     {
         Vector2 currentPoint = path[i-1];
         Vector2 nextPoint = path[i];
-        float length = (nextPoint-currentPoint).length();
-        float nextLength = currentLength+length;
+        double length = (nextPoint-currentPoint).length();
+        double nextLength = currentLength+length;
+
+        auto compute_tick = [&](double time, double distance) {
+            if (length < 1e-6)
+                return SliderTick{time, currentPoint};
+            else
+            {
+                float t = (distance - currentLength)/length;
+                return SliderTick{time, lerp(currentPoint, nextPoint, t)};
+            }
+        };
+        if (!have_legacy_last_tick && (legacy_last_tick.distance <= nextLength || i == last))
+        {
+            result.legacyLastTick = compute_tick(legacy_last_tick.time, legacy_last_tick.distance);
+            have_legacy_last_tick = true;
+        }
 
         while(nextLength > nextTick || i == last)
         {
-            if (length < 1e-6) // avoid numerical instability
-                result.ticks.push_back({nextTime, currentPoint}); 
-            else
+
+            result.ticks.push_back(compute_tick(nextTime, nextTick));
+
+            if (end)
             {
-                float t = (nextTick - currentLength)/length;
-                result.ticks.push_back({nextTime, lerp(path[i-1], path[i], t)});
+                if (!have_legacy_last_tick) throw std::runtime_error("legacy last tick past end of slider");
+                return result;
             }
-            if (sliderEnd) return result; 
 
             nextTick += tick_distance;
             nextTime += tick_duration;
 
-            if (nextTick + 1e-6 > slider_length)  // TODO check if game has an epsilon here
-            {
-                nextTick = slider_length;
-                nextTime = slider_length * tick_duration/tick_distance;
-                sliderEnd = true;
-            }
+            check_slider_end();
         }
         currentLength = nextLength;
     }
@@ -122,16 +184,16 @@ inline SliderPathTicks calculate_bezier_ticks(const slider_data& data, double ti
         }
     }
 
-    return calculate_ticks(path, data.length, tick_distance, tick_duration);
+    return calculate_ticks(path, data, tick_distance, tick_duration);
 }
 inline SliderPathTicks calculate_centripetal_catmull_rom_ticks(const slider_data& data, double tick_distance, double tick_duration)
 {
     std::vector<Vector2> path = ApproximateCatmull({data.control_points.begin(), data.control_points.end()});
-    return calculate_ticks(path, data.length, tick_distance, tick_duration);
+    return calculate_ticks(path, data, tick_distance, tick_duration);
 }
 inline SliderPathTicks calculate_linear_ticks(const slider_data& data, double tick_distance, double tick_duration)
 {
-    return calculate_ticks(data.control_points, data.length, tick_distance, tick_duration);
+    return calculate_ticks(data.control_points, data, tick_distance, tick_duration);
 }
 
 inline SliderPathTicks calculate_circle_ticks(const slider_data& data, double tick_distance, double tick_duration)
@@ -142,10 +204,12 @@ inline SliderPathTicks calculate_circle_ticks(const slider_data& data, double ti
     SliderPathTicks result;
     result.ticks.push_back({0,data.control_points[0]});
 
-    float distance = tick_distance;
+    double distance = tick_distance;
     double time=tick_duration;
+    const double min_distance_from_end = 10 * tick_distance/tick_duration;
 
-    while (distance + 1e-6 < data.length)
+
+    while (distance + min_distance_from_end < data.length)
     {
         result.ticks.push_back({time, arc->value_at(distance)});
         distance += tick_distance;
@@ -153,11 +217,17 @@ inline SliderPathTicks calculate_circle_ticks(const slider_data& data, double ti
     }
     result.ticks.push_back({data.length * tick_duration/tick_distance, arc->value_at(data.length)});
 
-    return result; 
+    const LegacyLastTickEvent legacy_last_tick(data,tick_distance,tick_duration);
+    result.legacyLastTick = {legacy_last_tick.time, arc->value_at(legacy_last_tick.distance)};
+    return result;
 }
 
 inline SliderPathTicks calculate_ticks(const slider_data& data, double tick_distance, double tick_duration)
 {
+    if (tick_duration == 0 || tick_distance == 0)
+    {
+        return {};
+    }
     switch(data.type)
     {
         case slider_type::Bezier:
@@ -181,24 +251,59 @@ void generate_slider_hit_objects(const slider_data& data, TimingPoints& timing_p
     double tick_duration = timing_points.tickDuration();
     double slide_duration = tick_duration * data.length / tick_distance;
 
+
     SliderPathTicks tick_locations = calculate_ticks(data,timing_points.tickDistance(), timing_points.tickDuration());
-    const auto& ticks = tick_locations.ticks; 
+
+    const auto& ticks = tick_locations.ticks;
     HitObject obj = data.slider_head;
     int tick_index = 0;
 
     on_event(data.slider_head);
+
+    if (tick_locations.ticks.empty())
+    {
+        on_event(HitObject{
+            .type = HitObjectType::slider_legacy_last_tick,
+            .x = data.slider_head.x,
+            .y = data.slider_head.y,
+            .time = data.slider_head.time,
+        });
+        on_event(HitObject{
+            .type = HitObjectType::slider_tail,
+            .x = data.slider_head.x,
+            .y = data.slider_head.y,
+            .time = data.slider_head.time,
+        });
+        return;
+    }
 
     for (int repeat = 0; repeat < data.slide_count; repeat+=2)
     {
         double slide_start = data.slider_head.time + repeat*slide_duration;
         for (int i=1; i<ticks.size(); ++i)
         {
-            on_event(HitObject{
-                .type = (i==ticks.size()-1 && repeat==data.slide_count-1) ? HitObjectType::slider_tail : HitObjectType::slider_tick,
-                .x = ticks[i].position.X,
-                .y = ticks[i].position.Y,
-                .time = float(slide_start + ticks[i].time),
-            });
+            if (i!=ticks.size()-1 || repeat!=data.slide_count-1)
+                on_event(HitObject{
+                    .type = HitObjectType::slider_tick,
+                    .x = ticks[i].position.X,
+                    .y = ticks[i].position.Y,
+                    .time = slide_start + ticks[i].time,
+                });
+            else
+            {
+                on_event(HitObject{
+                    .type = HitObjectType::slider_legacy_last_tick,
+                    .x = tick_locations.legacyLastTick.position.X,
+                    .y = tick_locations.legacyLastTick.position.Y,
+                    .time = data.slider_head.time + tick_locations.legacyLastTick.time,
+                });
+                on_event(HitObject{
+                    .type = HitObjectType::slider_tail,
+                    .x = ticks[i].position.X,
+                    .y = ticks[i].position.Y,
+                    .time = slide_start + ticks[i].time,
+                });
+            }
         }
         double slide_end = data.slider_head.time + (repeat+2)*slide_duration;
 
@@ -206,12 +311,28 @@ void generate_slider_hit_objects(const slider_data& data, TimingPoints& timing_p
         {
             for (int i=ticks.size()-2; i>=0; --i)
             {
-                on_event(HitObject{
-                    .type = (i==0 && repeat+1==data.slide_count-1) ? HitObjectType::slider_tail : HitObjectType::slider_tick,
-                    .x = ticks[i].position.X,
-                    .y = ticks[i].position.Y,
-                    .time = float(slide_end - ticks[i].time),
-                });
+                if (i!=0 || repeat+1!=data.slide_count-1)
+                    on_event(HitObject{
+                        .type = HitObjectType::slider_tick,
+                        .x = ticks[i].position.X,
+                        .y = ticks[i].position.Y,
+                        .time = slide_end - ticks[i].time,
+                    });
+                else
+                {
+                    on_event(HitObject{
+                        .type = HitObjectType::slider_legacy_last_tick,
+                        .x = tick_locations.legacyLastTick.position.X,
+                        .y = tick_locations.legacyLastTick.position.Y,
+                        .time = data.slider_head.time + tick_locations.legacyLastTick.time,
+                    });
+                    on_event(HitObject{
+                        .type = HitObjectType::slider_tail,
+                        .x = ticks[i].position.X,
+                        .y = ticks[i].position.Y,
+                        .time = slide_end - ticks[i].time,
+                    });
+                }
             }
         }
     }

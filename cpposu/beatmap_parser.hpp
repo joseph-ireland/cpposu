@@ -109,7 +109,7 @@ protected:
         {
             Vector2 p;
             take_numeric_column(p.X, *control_point_str, ':');
-            take_number(p.Y, *control_point_str);
+            read_number_or_throw(p.Y, *control_point_str);
             slider_data_.control_points.push_back(p);
         }
         generate_slider_hit_objects(slider_data_, beatmap_.timing_points, [this](auto&& ho){
@@ -124,7 +124,7 @@ protected:
         #define CPPOSU_DIFFICULTY_VAR(var) if (key == #var) beatmap_.difficulty_attributes.var = val;
         parse_section(first_line, [&](auto line){
             auto key = take_column(line, ':');
-            auto val = take_number<double>(line);
+            auto val = read_number_or_throw<double>(line);
 
             CPPOSU_DIFFICULTY_VAR(HPDrainRate);
             CPPOSU_DIFFICULTY_VAR(CircleSize);
@@ -134,8 +134,10 @@ protected:
             CPPOSU_DIFFICULTY_VAR(SliderTickRate);
         });
         #undef CPPOSU_DIFFICULTY_VAR
-        
+
         beatmap_.timing_points.baseSliderVelocity = beatmap_.difficulty_attributes.SliderMultiplier;
+        beatmap_.timing_points.sliderTickRate = beatmap_.difficulty_attributes.SliderTickRate;
+
     }
 
     void parse_timing_points(std::string_view first_line)
@@ -149,7 +151,7 @@ protected:
             take_numeric_column(t.sampleIndex, line);
             take_numeric_column(t.volume, line);
             take_numeric_column(t.uninherited, line);
-            try_take_numeric_column(t.effects, line);
+            std::ignore = try_take_numeric_column(t.effects, line);
             beatmap_.timing_points.points.push_back(t);
         });
     }
@@ -178,23 +180,27 @@ inline Beatmap BeatmapParser::parse()
     read_line(); // parse_section consumes a line that has already been read (needed to detect section begin)
 
     while(stream_) parse_section();
-    
+
     return beatmap_;
 }
 
 inline void BeatmapParser::parse_header()
 {
     auto line = read_line();
+
+    std::string_view bom = "\xEF\xBB\xBF";
+    try_take_prefix(line, bom);
+
     std::string_view prefix_string = "osu file format v";
 
     if (!try_take_prefix(line, prefix_string))
         CPPOSU_RAISE_PARSE_ERROR("Invalid file prefix, expected \"" << prefix_string << debug_location(line));
 
-    beatmap_.version = take_number<int>(line);
+    beatmap_.version = read_number_or_throw<int>(line);
 }
 
 inline void BeatmapParser::parse_section()
-{   
+{
     auto line = reread_last_line();
     if (!is_section_start(line))
         CPPOSU_RAISE_PARSE_ERROR("Expected section start: " << debug_location(line));

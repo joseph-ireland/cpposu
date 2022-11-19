@@ -1,3 +1,4 @@
+#include "cpposu/types.hpp"
 #include <external/catch2/catch.hpp>
 
 #include <cpposu/beatmap_parser.hpp>
@@ -29,7 +30,7 @@ TEST_CASE("parse tutorial", "[beatmap_parser]")
     CHECK(beatmap.timing_points.points[0].uninherited == 1);
     CHECK(beatmap.timing_points.points[0].effects == 0);
 
-    REQUIRE(beatmap.hit_objects.size() == 29);
+    REQUIRE(beatmap.hit_objects.size() == 32);
     int i=0;
     using cpposu::HitObject;
     CHECK(beatmap.hit_objects[i++] == HitObject{.type=cpposu::circle, .x=64, .y=280, .time=30172});
@@ -68,6 +69,7 @@ TEST_CASE("parse tutorial", "[beatmap_parser]")
     CHECK(beatmap.hit_objects[i].y == 192);
     CHECK(beatmap.hit_objects[i].time == Approx(85917).epsilon(0.5));
     i++;
+    CHECK(beatmap.hit_objects[i++].type == cpposu::slider_legacy_last_tick);
 
     CHECK(beatmap.hit_objects[i].type == cpposu::slider_tail);
     CHECK(beatmap.hit_objects[i].x == 432);
@@ -106,6 +108,7 @@ TEST_CASE("parse tutorial", "[beatmap_parser]")
     CHECK(beatmap.hit_objects[i].y == 272);
     CHECK(beatmap.hit_objects[i].time == Approx(88910).epsilon(0.5));
     i++;
+    CHECK(beatmap.hit_objects[i++].type == cpposu::slider_legacy_last_tick);
 
     CHECK(beatmap.hit_objects[i].type == cpposu::slider_tail);
     CHECK(beatmap.hit_objects[i].x == Approx(80));
@@ -157,6 +160,7 @@ TEST_CASE("parse tutorial", "[beatmap_parser]")
     CHECK(beatmap.hit_objects[i].y == 352);
     CHECK(beatmap.hit_objects[i].time == Approx(92651).epsilon(0.5));
     i++;
+    CHECK(beatmap.hit_objects[i++].type == cpposu::slider_legacy_last_tick);
 
     CHECK(beatmap.hit_objects[i].type == cpposu::slider_tail);
     CHECK(beatmap.hit_objects[i].x == Approx(136));

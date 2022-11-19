@@ -15,9 +15,10 @@ namespace cpposu {
 enum HitObjectType : int
 {
     circle,
-    
+
     slider_head,
     slider_tick,
+    slider_legacy_last_tick,
     slider_tail,
 
     spinner_start,
@@ -30,6 +31,7 @@ constexpr const char* to_string(HitObjectType h)
     case HitObjectType::circle: return "circle";
     case HitObjectType::slider_head: return "slider_head";
     case HitObjectType::slider_tick: return "slider_tick";
+    case HitObjectType::slider_legacy_last_tick: return "slider_legacy_last_tick";
     case HitObjectType::slider_tail: return "slider_tail";
     case HitObjectType::spinner_start: return "spinner_start";
     case HitObjectType::spinner_end: return "spinner_end";
@@ -54,7 +56,7 @@ struct MapDifficultyAttributes
 
 struct TimingPoint
 {
-    uint64_t time{};
+    int64_t time{};
     double beatLength{};
     int meter{};
     int sampleSet{};
@@ -69,22 +71,27 @@ struct TimingPoints
     std::vector<TimingPoint> points;
     size_t nextIndex=0;
     double currentBeatLength=0;
-    double currentSliderVelocityMultiplier=100;
+    double currentSliderVelocityMultiplier=1;
     double baseSliderVelocity=1;
     double sliderTickRate=1;
 
-    double tickDistance() { return currentSliderVelocityMultiplier * baseSliderVelocity / sliderTickRate; }
+    double tickDistance() { return 100 * currentSliderVelocityMultiplier * baseSliderVelocity / sliderTickRate; }
     double tickDuration() { return currentBeatLength / sliderTickRate; }
-    void advanceTime(uint64_t time)
+    void advanceTime(int64_t time)
     {
-        while(nextIndex < points.size() && points[nextIndex].time < time)
+        while(nextIndex < points.size() && points[nextIndex].time <= time)
         {
-            size_t currentIndex = nextIndex; 
+            size_t currentIndex = nextIndex;
             nextIndex++;
             if (points[currentIndex].uninherited)
+            {
                 currentBeatLength = points[currentIndex].beatLength;
+                currentSliderVelocityMultiplier = 1;
+            }
             else
-                currentSliderVelocityMultiplier = - points[currentIndex].beatLength;
+            {
+                currentSliderVelocityMultiplier = -100/points[currentIndex].beatLength;
+            }
         }
     }
 };
@@ -99,8 +106,9 @@ enum HitObjectTypeFlags
 struct HitObject
 {
     HitObjectType type;
-        
-    float x, y, time;
+
+    float x, y;
+    double time;
     auto operator <=>(const HitObject&) const = default;
 };
 
@@ -113,7 +121,7 @@ struct Beatmap
 {
     int version;
 
-    std::optional<std::unordered_map<std::string, std::string>> general, metadata; 
+    std::optional<std::unordered_map<std::string, std::string>> general, metadata;
     MapDifficultyAttributes difficulty_attributes;
     TimingPoints timing_points;
     std::vector<HitObject> hit_objects;
@@ -138,28 +146,44 @@ struct Vector2 {
     auto operator<=>(const Vector2&) const = default;
 };
 
-template <typename T, size_t N=1024>
+
+
+template <typename T, size_t N=2048>
 class Arena
 {
-    std::array<T,N> data;
-    size_t index=0;
+    Arena(const Arena&) = delete;
+    struct segment {
+        std::array<T,N> data;
+        size_t index=0;
+    };
     void grow()
     {
-        last->next = std::make_unique<Arena>();
-        last = last->next.get();
+        segments.emplace_back();
+        current = &segments.back();
     }
-    std::unique_ptr<Arena> next;
-    Arena* last = this;
+    segment first;
+    segment* current = &first;
+    std::vector<segment> segments;
+    std::vector<std::unique_ptr<T[]>> large_allocations;
+
 public:
+    Arena() = default;
+
     std::span<T> take(size_t n)
     {
-        if (last->index+n>=N) [[unlikely]] 
+        if (current->index+n>=N) [[unlikely]]
         {
-            if (n >= N) throw std::runtime_error("Overflow arena"); 
-            grow(); 
+            if (3*n >= N)
+            {
+                auto data = std::make_unique<T[]>(n);
+                std::span<T> result {data.get(), n};
+                large_allocations.emplace_back(std::move(data));
+                return result;
+            }
+            grow();
         }
-        std::span<T> result{&last->data[last->index], n};
-        last->index += n;
+        std::span<T> result{&current->data[current->index], n};
+        current->index += n;
         return result;
     }
 };

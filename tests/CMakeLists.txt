@@ -1,4 +1,10 @@
 
+add_executable(dump_beatmap)
+target_sources(dump_beatmap PRIVATE
+    dump_beatmap.cpp
+)
+target_link_libraries(dump_beatmap PRIVATE cpposu)
+
 add_executable(cpposu_tests)
 
 target_sources(cpposu_tests PRIVATE

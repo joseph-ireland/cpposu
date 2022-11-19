@@ -48,7 +48,7 @@ TEST_CASE("Basic parsing", "[line_parser]")
     auto first_column = cpposu::try_take_column(line);
     CHECK(bool(first_column));
     CHECK(first_column.value() == "don't strip");
-    CHECK(line == "strip me");
+    CHECK(line == " strip me");
     CHECK(cpposu::try_take_column(line)=="strip me");
     CHECK(line.empty());
 }
@@ -73,7 +73,7 @@ TEST_CASE("Numeric parsing", "[line_parser]")
     CHECK(test_int == 2);
     CHECK(parser.take_numeric_column<double>(line) == 5.0);
     double test_double;
-    parser.take_number(test_double, line);
+    parser.take_numeric_column(test_double, line);
     CHECK(test_double == Approx(1e2));
     CHECK(line.empty());
     
