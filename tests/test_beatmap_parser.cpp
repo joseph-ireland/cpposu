@@ -9,7 +9,7 @@ TEST_CASE("parse tutorial", "[beatmap_parser]")
 {
     cpposu::BeatmapParser parser(CPPOSU_TEST_DIR "./Peter Lambert - osu! tutorial (peppy) [Gameplay basics].osu");
     auto beatmap = parser.parse();
-    
+
     CHECK(beatmap.difficulty_attributes.HPDrainRate == Approx(0));
     CHECK(beatmap.difficulty_attributes.CircleSize == Approx(3));
     CHECK(beatmap.difficulty_attributes.OverallDifficulty == Approx(0));
@@ -27,7 +27,7 @@ TEST_CASE("parse tutorial", "[beatmap_parser]")
     CHECK(beatmap.timing_points.points[0].sampleSet == 1);
     CHECK(beatmap.timing_points.points[0].sampleIndex == 0);
     CHECK(beatmap.timing_points.points[0].volume == 100);
-    CHECK(beatmap.timing_points.points[0].uninherited == 1);
+    CHECK(beatmap.timing_points.points[0].timing_change == 1);
     CHECK(beatmap.timing_points.points[0].effects == 0);
 
     REQUIRE(beatmap.hit_objects.size() == 32);
@@ -37,7 +37,7 @@ TEST_CASE("parse tutorial", "[beatmap_parser]")
     CHECK(beatmap.hit_objects[i++] == HitObject{.type=cpposu::circle, .x=192, .y=280, .time=31669});
     CHECK(beatmap.hit_objects[i++] == HitObject{.type=cpposu::circle, .x=328, .y=280, .time=33165});
     CHECK(beatmap.hit_objects[i++] == HitObject{.type=cpposu::circle, .x=456, .y=280, .time=34662});
-    
+
     CHECK(beatmap.hit_objects[i++] == HitObject{.type=cpposu::slider_head, .x=72, .y=192, .time=84046});
 
     CHECK(beatmap.hit_objects[i].type == cpposu::slider_tick);
@@ -115,7 +115,7 @@ TEST_CASE("parse tutorial", "[beatmap_parser]")
     CHECK(beatmap.hit_objects[i].y == 272);
     CHECK(beatmap.hit_objects[i].time == Approx(89284).epsilon(0.5));
     i++;
-    
+
     CHECK(beatmap.hit_objects[i++] == HitObject{.type=cpposu::slider_head, .x=136, .y=352, .time=90032});
 
     CHECK(beatmap.hit_objects[i].type == cpposu::slider_tick);
@@ -167,7 +167,7 @@ TEST_CASE("parse tutorial", "[beatmap_parser]")
     CHECK(beatmap.hit_objects[i].y == 352);
     CHECK(beatmap.hit_objects[i].time == Approx(93025).epsilon(0.5));
     i++;
-    
+
     CHECK(beatmap.hit_objects[i++] == HitObject{.type=cpposu::spinner_start, .x=256, .y=192, .time=113976});
     CHECK(beatmap.hit_objects[i++] == HitObject{.type=cpposu::spinner_end, .x=256, .y=192, .time=119587});
 

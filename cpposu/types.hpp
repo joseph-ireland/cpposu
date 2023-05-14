@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <math.h>
+#include <stdexcept>
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -24,6 +27,28 @@ enum HitObjectType : int
     spinner_start,
     spinner_end,
 };
+struct Vector2 {
+    float X,Y;
+
+    Vector2 operator-() const { return {-X, -Y}; }
+    Vector2 operator+(Vector2 b) const { return {X+b.X, Y+b.Y}; }
+    Vector2 operator-(Vector2 b) const { return {X-b.X, Y-b.Y}; }
+    Vector2 operator/(float a) const { return {X/a, Y/a}; }
+    Vector2 operator*(float a) const  { return {a*X, a*Y}; }
+    Vector2 operator+=(Vector2 a) { *this = *this + a; return *this;}
+    Vector2 operator-=(Vector2 a) { *this = *this - a; return *this;}
+
+    friend Vector2 operator*(float a, Vector2 b)  { return b*a; }
+    friend Vector2 lerp(Vector2 a, Vector2 b, float t) { return (1-t)*a + t*b; }
+
+    float squared_length() { return X*X+Y*Y; }
+    float length() { return std::sqrtf(squared_length()); }
+
+    float dot(const Vector2& other) { return X*other.X + Y*other.Y; }
+
+    auto operator<=>(const Vector2&) const = default;
+};
+
 
 constexpr const char* to_string(HitObjectType h)
 {
@@ -56,42 +81,68 @@ struct MapDifficultyAttributes
 
 struct TimingPoint
 {
-    int64_t time{};
+    double time{};
     double beatLength{};
     int meter{};
     int sampleSet{};
     int sampleIndex{};
     int volume{};
-    bool uninherited{};
+    bool timing_change{};
     uint64_t effects{};
 };
 
 struct TimingPoints
 {
+    static constexpr double default_beat_length = 60000.0 / 60.0;
     std::vector<TimingPoint> points;
+    double currentTime=-INFINITY;
     size_t nextIndex=0;
-    double currentBeatLength=0;
+    double currentBeatLength=default_beat_length;
     double currentSliderVelocityMultiplier=1;
     double baseSliderVelocity=1;
     double sliderTickRate=1;
 
-    double tickDistance() { return 100 * currentSliderVelocityMultiplier * baseSliderVelocity / sliderTickRate; }
-    double tickDuration() { return currentBeatLength / sliderTickRate; }
-    void advanceTime(int64_t time)
+    double tickDistance(int beatmap_version)
     {
+        if (beatmap_version >= 8)
+            return  100 * currentSliderVelocityMultiplier * baseSliderVelocity / sliderTickRate;
+        return 100 * baseSliderVelocity  / sliderTickRate;
+    }
+    double tickDuration(int beatmap_version)
+    {
+        if (beatmap_version >= 8)
+            return currentBeatLength / sliderTickRate;
+        return currentBeatLength / (sliderTickRate * currentSliderVelocityMultiplier);
+    }
+    void applyDefaults()
+    {
+        if (points.size()>0) currentBeatLength = points[0].beatLength;
+    }
+    void advanceTime(double time)
+    {
+        if (currentTime > time)
+        {
+            throw std::runtime_error("Time points accessed non-sequentially, probably an aspire map");
+        }
+        currentTime=time;
         while(nextIndex < points.size() && points[nextIndex].time <= time)
         {
-            size_t currentIndex = nextIndex;
-            nextIndex++;
-            if (points[currentIndex].uninherited)
+            double currentTime = points[nextIndex].time;
+            currentSliderVelocityMultiplier=1;
+
+            do
             {
-                currentBeatLength = points[currentIndex].beatLength;
-                currentSliderVelocityMultiplier = 1;
-            }
-            else
-            {
-                currentSliderVelocityMultiplier = -100/points[currentIndex].beatLength;
-            }
+                size_t currentIndex = nextIndex;
+                nextIndex++;
+                if (points[currentIndex].timing_change)
+                {
+                    currentBeatLength = std::clamp(points[currentIndex].beatLength, 6.0, 60000.0);
+                }
+                else if (points[currentIndex].beatLength < 0)
+                {
+                    currentSliderVelocityMultiplier = std::clamp(-100/points[currentIndex].beatLength, 0.1, 10.0);
+                }
+            } while(nextIndex < points.size() && points[nextIndex].time == currentTime);
         }
     }
 };
@@ -110,6 +161,7 @@ struct HitObject
     float x, y;
     double time;
     auto operator <=>(const HitObject&) const = default;
+    Vector2 position() const { return Vector2{x,y}; }
 };
 
 inline std::ostream& operator <<(std::ostream& os, const HitObject& h)
@@ -119,6 +171,7 @@ inline std::ostream& operator <<(std::ostream& os, const HitObject& h)
 
 struct Beatmap
 {
+    static constexpr int FIRST_LAZER_VERSION = 128;
     int version;
 
     std::optional<std::unordered_map<std::string, std::string>> general, metadata;
@@ -127,63 +180,52 @@ struct Beatmap
     std::vector<HitObject> hit_objects;
 };
 
-struct Vector2 {
-    float X,Y;
+enum class slider_type
+{
+    None=0,
+    Bezier='B',
+    CentripetalCatmullRom='C',
+    Linear='L',
+    PerfectCircle='P',
+};
 
-    Vector2 operator-() const { return {-X, -Y}; }
-    Vector2 operator+(Vector2 b) const { return {X+b.X, Y+b.Y}; }
-    Vector2 operator-(Vector2 b) const { return {X-b.X, Y-b.Y}; }
-    Vector2 operator/(float a) const { return {X/a, Y/a}; }
-    Vector2 operator*(float a) const  { return {a*X, a*Y}; }
-    friend Vector2 operator*(float a, Vector2 b)  { return b*a; }
-    friend Vector2 lerp(Vector2 a, Vector2 b, float t) { return (1-t)*a + t*b; }
-
-    float squared_length() { return X*X+Y*Y; }
-    float length() { return std::sqrtf(squared_length()); }
-
-    float dot(const Vector2& other) { return X*other.X + Y*other.Y; }
-
-    auto operator<=>(const Vector2&) const = default;
+struct SliderControlPoint
+{
+    slider_type new_slider_type = slider_type::None;
+    Vector2 position;
 };
 
 
 
-template <typename T, size_t N=2048>
+template <typename T, size_t N=512>
 class Arena
 {
     Arena(const Arena&) = delete;
-    struct segment {
-        std::array<T,N> data;
-        size_t index=0;
-    };
-    void grow()
+
+    void grow(size_t required_size)
     {
-        segments.emplace_back();
-        current = &segments.back();
+        size = std::max(2*size, required_size);
+        allocations.emplace_back(std::make_unique<T[]>(size));
+        available = {allocations.back().get(), size};
     }
-    segment first;
-    segment* current = &first;
-    std::vector<segment> segments;
-    std::vector<std::unique_ptr<T[]>> large_allocations;
+
+    std::array<T, N> stack_data;
+    std::span<T> available = stack_data;
+    size_t size = N;
+    std::vector<std::unique_ptr<T[]>> allocations;
 
 public:
     Arena() = default;
 
     std::span<T> take(size_t n)
     {
-        if (current->index+n>=N) [[unlikely]]
+        if (n>=available.size()) [[unlikely]]
         {
-            if (3*n >= N)
-            {
-                auto data = std::make_unique<T[]>(n);
-                std::span<T> result {data.get(), n};
-                large_allocations.emplace_back(std::move(data));
-                return result;
-            }
-            grow();
+            grow(n);
         }
-        std::span<T> result{&current->data[current->index], n};
-        current->index += n;
+
+        std::span<T> result = available.subspan(0,n);
+        available = available.subspan(n, available.size()-n);
         return result;
     }
 };

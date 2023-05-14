@@ -26,7 +26,7 @@ inline std::string_view trim_leading_space(std::string_view data)
     size_t pos=data.find_first_not_of(" \t");
     if (pos != std::string_view::npos)
         return data.substr(pos);
-    return {};
+    return {data.data(),0};
 }
 
 inline std::string_view trim_trailing_space(std::string_view data)
@@ -34,7 +34,7 @@ inline std::string_view trim_trailing_space(std::string_view data)
     size_t pos=data.find_last_not_of(" \t");
     if (pos != std::string_view::npos)
         return data.substr(0,pos+1);
-    return {};
+    return {data.data(),0};
 
 }
 inline std::string_view trim_space(std::string_view data)
@@ -73,7 +73,7 @@ inline std::optional<std::string_view> try_take_column(std::string_view& data, c
 }
 
 template<typename T=double>
-std::optional<T> read_number(std::string_view& str)
+std::optional<T> read_number(const std::string_view& str)
 {
     T result;
     auto [next, ec] = std::from_chars(str.data(), str.data()+str.size(), result);
@@ -85,7 +85,7 @@ std::optional<T> read_number(std::string_view& str)
 }
 
 template<typename T>
-[[nodiscard]] bool read_number(T& result, std::string_view& str)
+[[nodiscard]] bool read_number(T& result, const std::string_view& str)
 {
     auto x = read_number<T>(str);
     if (x)
@@ -182,7 +182,7 @@ public:
     }
 
     template<typename T=double>
-    T read_number_or_throw(std::string_view& line)
+    T read_number_or_throw(const    std::string_view& line)
     {
         auto result = read_number<T>(line);
         if (result) return *result;
@@ -190,7 +190,7 @@ public:
         CPPOSU_RAISE_PARSE_ERROR("failed to read number: " << debug_location(line));
     }
     template<typename T>
-    void read_number_or_throw(T& result, std::string_view& line)
+    void read_number_or_throw(T& result, const std::string_view& line)
     {
         result = read_number_or_throw<T>(line);
     }

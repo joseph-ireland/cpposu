@@ -132,7 +132,7 @@ namespace cpposu
     /// </summary>
     /// <param name="controlPoints">The control points.</param>
     /// <returns>A list of vectors representing the piecewise-linear approximation.</returns>
-    inline void ApproximateBezier(std::vector<Vector2>& output, std::span<const Vector2> controlPoints)
+    inline void ApproximateBezier(std::vector<Vector2>& output, std::span<const SliderControlPoint> controlPoints)
     {
         int p = controlPoints.size() - 1;
 
@@ -146,9 +146,14 @@ namespace cpposu
         std::vector<std::span<Vector2>> toFlatten;
         std::vector<std::span<Vector2>> freeBuffers;
 
-        // below algorithm can reuse the buffer, so take a copy
         auto inputPoints = arena.take(controlPoints.size());
-        std::copy(controlPoints.begin(), controlPoints.end(), inputPoints.begin());
+        {
+            size_t i =0;
+            for (const auto& point : controlPoints)
+            {
+                inputPoints[i++] = point.position;
+            }
+        }
 
         toFlatten.push_back(inputPoints);
         // "toFlatten" contains all the curves which are not yet approximated well enough.
@@ -191,62 +196,85 @@ namespace cpposu
             toFlatten.push_back(parent);
         }
 
-        output.push_back(controlPoints[p]);
+        output.push_back(controlPoints[p].position);
     }
 
     /// <summary>
     /// Creates a piecewise-linear approximation of a Catmull-Rom spline.
     /// </summary>
     /// <returns>A list of vectors representing the piecewise-linear approximation.</returns>
-    inline std::vector<Vector2> ApproximateCatmull(std::span<const Vector2> controlPoints)
+    inline void ApproximateCatmull(std::vector<Vector2>& out, std::span<const SliderControlPoint> controlPoints)
     {
-        auto result = std::vector<Vector2>((controlPoints.size() - 1) * detail::catmull_detail * 2);
-
+        out.reserve(out.size()+(controlPoints.size() - 1) * detail::catmull_detail * 2);
         for (int i = 0; i < controlPoints.size() - 1; i++)
         {
-            auto v1 = i > 0 ? controlPoints[i - 1] : controlPoints[i];
-            auto v2 = controlPoints[i];
-            auto v3 = i < controlPoints.size() - 1 ? controlPoints[i + 1] : v2 + v2 - v1;
-            auto v4 = i < controlPoints.size() - 2 ? controlPoints[i + 2] : v3 + v3 - v2;
+            auto v1 = i > 0 ? controlPoints[i - 1].position : controlPoints[i].position;
+            auto v2 = controlPoints[i].position;
+            auto v3 = i < controlPoints.size() - 1 ? controlPoints[i + 1].position : v2 + v2 - v1;
+            auto v4 = i < controlPoints.size() - 2 ? controlPoints[i + 2].position : v3 + v3 - v2;
 
             for (int c = 0; c < detail::catmull_detail; c++)
             {
-                result.push_back(detail::catmullFindPoint(v1, v2, v3, v4, (float)c / detail::catmull_detail));
-                result.push_back(detail::catmullFindPoint(v1, v2, v3, v4, (float)(c + 1) / detail::catmull_detail));
+                out.push_back(detail::catmullFindPoint(v1, v2, v3, v4, (float)c / detail::catmull_detail));
+                out.push_back(detail::catmullFindPoint(v1, v2, v3, v4, (float)(c + 1) / detail::catmull_detail));
             }
         }
-
-        return result;
     }
 
     struct CircularArc
     {
         Vector2 Centre;
-        float Radius, ThetaStart, ThetaRange, AmountPoints, Direction, LengthToAngleMultiplier;
+        int AmountPoints;
+        float Radius;
+        double ThetaStart, ThetaRange, Direction, LengthToAngleMultiplier;
 
-        Vector2 value_at(float distance)
+        Vector2 position_at_distance(float distance)
         {
             float theta = distance * LengthToAngleMultiplier;
             float theta_inc = Direction*ThetaRange/(AmountPoints-1);
-            float theta_0 = theta_inc*std::min(std::floor(theta/theta_inc), AmountPoints-2);
+            float theta_0 = theta_inc*std::min(std::floor(theta/theta_inc), AmountPoints-2.0f);
             float theta_1 = theta_0+theta_inc;
             float t = (theta-theta_0)/theta_inc;
 
             theta_0 += ThetaStart;
             theta_1 += ThetaStart;
 
-            auto point_0 = Centre + Radius * Vector2{std::cos(theta_0), std::sin(theta_0)};
-            auto point_1 = Centre + Radius * Vector2{std::cos(theta_1), std::sin(theta_1)};
+            auto point_0 = position_at_theta(theta_0);
+            auto point_1 = position_at_theta(theta_1);
             return lerp(point_0, point_1, t);
         }
 
-        static std::optional<CircularArc> fromControlPoints(std::span<const Vector2> controlPoints)
+        Vector2 position_at_theta(double theta)
         {
-            if (controlPoints.size() < 3) return {};
+            return Centre + Radius * Vector2{(float)std::cos(theta), (float)std::sin(theta)};
+        }
 
-            Vector2 a = controlPoints[0];
-            Vector2 b = controlPoints[1];
-            Vector2 c = controlPoints[2];
+        Vector2 position_at_distance_nolerp(float distance)
+        {
+            float theta = ThetaStart + distance * LengthToAngleMultiplier;
+            return position_at_theta(distance);
+        }
+
+        void Approximate(std::vector<Vector2>& out)
+        {
+            out.reserve(out.size()+AmountPoints);
+
+            for(int i=0; i<AmountPoints; ++i)
+            {
+                double fract = i / double(AmountPoints - 1);
+                double theta = ThetaStart + Direction * fract * ThetaRange;
+                out.push_back(position_at_theta(theta));
+            }
+        }
+
+
+        static std::optional<CircularArc> fromControlPoints(std::span<const SliderControlPoint> controlPoints)
+        {
+            if (controlPoints.size() != 3) return {};
+
+            Vector2 a = controlPoints[0].position;
+            Vector2 b = controlPoints[1].position;
+            Vector2 c = controlPoints[2].position;
 
             // If we have a degenerate triangle where a side-length is almost zero, then give up and fallback to a more numerically stable method.
             if (std::abs((b.Y - a.Y) * (c.X - a.X) - (b.X - a.X) * (c.Y - a.Y)) < 1e-8)
@@ -271,10 +299,10 @@ namespace cpposu
 
             result.Radius = dA.length();
 
-            result.ThetaStart = std::atan2(dA.Y, dA.X);
+            result.ThetaStart = std::atan2((double)dA.Y, (double)dA.X);
 
             result.Direction = 1;
-            float thetaEnd = std::atan2(dC.Y, dC.X);
+            double thetaEnd = std::atan2((double)dC.Y, (double)dC.X);
 
             while (thetaEnd < result.ThetaStart)
                 thetaEnd += 2 * std::numbers::pi;
@@ -297,10 +325,11 @@ namespace cpposu
 
             // osu! approximates circles as linear segments with below tolerance
             // This makes the overall path shorter
-            constexpr double circular_arc_tolerance = 0.1;
+            constexpr float circular_arc_tolerance = 0.1;
             if (circular_arc_tolerance < 2*result.Radius)
             {
-                result.AmountPoints = std::max(2.0,std::ceil(result.ThetaRange / (2*std::acos(1 - circular_arc_tolerance / result.Radius))));
+                double point_count = result.ThetaRange / (2*std::acos((double)(1.0f - circular_arc_tolerance / result.Radius)));
+                result.AmountPoints = std::max(2.0,std::ceil(point_count));
             }
             else  {
                 result.AmountPoints = 2;
@@ -313,4 +342,42 @@ namespace cpposu
         }
 
     };
+
+    inline void ApproximateCircle(std::vector<Vector2>& output, std::span<const SliderControlPoint> controlPoints)
+    {
+        std::optional<CircularArc> arc = CircularArc::fromControlPoints(controlPoints);
+        if (!arc) return ApproximateBezier(output, controlPoints);
+
+        arc->Approximate(output);
+    }
+
+    inline void AppendLinear(std::vector<Vector2>& path, std::span<const SliderControlPoint> controlPoints)
+    {
+        path.reserve(path.size()+controlPoints.size());
+        for(const auto& point : controlPoints)
+        {
+            path.push_back(point.position);
+        }
+    }
+
+
+    inline void calculate_segment_path(std::vector<Vector2>& path, std::span<const SliderControlPoint> control_points)
+    {
+        if (control_points.empty()) return;
+
+        switch(control_points[0].new_slider_type)
+        {
+            case slider_type::Bezier:
+                return ApproximateBezier(path, control_points);
+            case slider_type::PerfectCircle:
+                return ApproximateCircle(path, control_points);
+            case slider_type::Linear:
+                return AppendLinear(path, control_points);
+            case slider_type::CentripetalCatmullRom:
+                return ApproximateCatmull(path, control_points);
+            default:
+                throw std::runtime_error("unknown slider type");
+        }
+    }
+
 }
