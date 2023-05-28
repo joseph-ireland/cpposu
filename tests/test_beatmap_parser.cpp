@@ -16,9 +16,9 @@ TEST_CASE("parse tutorial", "[beatmap_parser]")
     CHECK(beatmap.difficulty_attributes.SliderMultiplier == Approx(0.6));
     CHECK(beatmap.difficulty_attributes.SliderTickRate == Approx(1));
 
-    REQUIRE(beatmap.metadata);
-    CHECK(beatmap.metadata->at("Title") == "osu! tutorial");
-    CHECK(beatmap.metadata->at("Creator") == "peppy");
+    CHECK(beatmap.info.Title == "osu! tutorial");
+    CHECK(beatmap.info.Creator == "peppy");
+    CHECK(beatmap.info.StackLeniency == 0.7f);
 
     REQUIRE(beatmap.timing_points.points.size() == 1);
     CHECK(beatmap.timing_points.points[0].time == 243);
@@ -136,7 +136,7 @@ TEST_CASE("parse tutorial", "[beatmap_parser]")
     CHECK(beatmap.hit_objects[i].time == Approx(91154).epsilon(0.5));
     i++;
 
-    CHECK(beatmap.hit_objects[i].type == cpposu::slider_tick);
+    CHECK(beatmap.hit_objects[i].type == cpposu::slider_repeat);
     CHECK(beatmap.hit_objects[i].x == Approx(376));
     CHECK(beatmap.hit_objects[i].y == 352);
     CHECK(beatmap.hit_objects[i].time == Approx(91529).epsilon(0.5));

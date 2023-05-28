@@ -1,7 +1,9 @@
-#include "cpposu/types.hpp"
+
+#include <cpposu/beatmap_parser.hpp>
+#include <cpposu/stacking.hpp>
+
 #include <iostream>
 #include <iomanip>
-#include <cpposu/beatmap_parser.hpp>
 
 int main(int argc, char* argv[])
 {
@@ -12,6 +14,7 @@ int main(int argc, char* argv[])
     }
     cpposu::BeatmapParser parser(argv[1]);
     auto beatmap = parser.parse();
+    cpposu::apply_stacking(beatmap);
     std::cout << std::fixed << std::setprecision(3);
 
     for (const auto& obj : beatmap.hit_objects)

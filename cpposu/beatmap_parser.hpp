@@ -10,6 +10,7 @@
 #include <string_view>
 #include <sstream>
 #include <charconv>
+#include <cmath>
 
 
 namespace cpposu
@@ -55,6 +56,51 @@ protected:
 
         return result;
     }
+    #define CPPOSU_ATTRIBUTE_STR(var) if (key == #var) beatmap_.info.var = val
+    #define CPPOSU_ATTRIBUTE_NUMBER(var) if (key == #var)  read_number_or_throw(beatmap_.info.var, val)
+    #define CPPOSU_ATTRIBUTE_BOOL(var) if (key == #var)  beatmap_.info.var = (read_number_or_throw<int>(val) == 1)
+
+    void parse_general(std::string_view first_line)
+    {
+        parse_section(first_line, [&](auto line){
+            auto key = take_column(line, ':');
+            auto val = trim_space(line);
+
+            CPPOSU_ATTRIBUTE_STR(AudioFilename);
+            CPPOSU_ATTRIBUTE_NUMBER(AudioLeadIn);
+            CPPOSU_ATTRIBUTE_NUMBER(PreviewTime);
+            CPPOSU_ATTRIBUTE_STR(SampleSet);
+            CPPOSU_ATTRIBUTE_NUMBER(SampleVolume);
+            CPPOSU_ATTRIBUTE_NUMBER(StackLeniency);
+            CPPOSU_ATTRIBUTE_NUMBER(Mode);
+            CPPOSU_ATTRIBUTE_BOOL(LetterboxInBreaks);
+            CPPOSU_ATTRIBUTE_BOOL(SpecialStyle);
+            CPPOSU_ATTRIBUTE_BOOL(WidescreenStoryboard);
+            CPPOSU_ATTRIBUTE_BOOL(EpilepsyWarning);
+            CPPOSU_ATTRIBUTE_BOOL(SamplesMatchPlaybackRate);
+            CPPOSU_ATTRIBUTE_NUMBER(Countdown);
+            CPPOSU_ATTRIBUTE_NUMBER(CountdownOffset);
+        });
+    }
+
+    void parse_metadata(std::string_view first_line)
+    {
+        parse_section(first_line, [&](auto line){
+            auto key = take_column(line, ':');
+            auto val = trim_space(line);
+
+            CPPOSU_ATTRIBUTE_STR(Title);
+            CPPOSU_ATTRIBUTE_STR(TitleUnicode);
+            CPPOSU_ATTRIBUTE_STR(Artist);
+            CPPOSU_ATTRIBUTE_STR(ArtistUnicode);
+            CPPOSU_ATTRIBUTE_STR(Creator);
+            CPPOSU_ATTRIBUTE_STR(Version);
+            CPPOSU_ATTRIBUTE_STR(Source);
+            CPPOSU_ATTRIBUTE_STR(Tags);
+            CPPOSU_ATTRIBUTE_NUMBER(BeatmapID);
+            CPPOSU_ATTRIBUTE_NUMBER(BeatmapSetID);
+        });
+    }
 
     void parse_hit_objects(std::string_view first_line)
     {
@@ -85,6 +131,7 @@ protected:
             }
         });
     }
+
 
     void parse_spinner(HitObject spinner_start, std::string_view extras)
     {
@@ -227,7 +274,6 @@ protected:
         });
     }
 
-    void parse_metadata(std::string_view first_line);
     void parse_difficulty(std::string_view first_line)
     {
         #define CPPOSU_DIFFICULTY_VAR(var) if (key == #var) beatmap_.difficulty_attributes.var = val;
@@ -246,7 +292,8 @@ protected:
 
         beatmap_.timing_points.baseSliderVelocity = beatmap_.difficulty_attributes.SliderMultiplier;
         beatmap_.timing_points.sliderTickRate = beatmap_.difficulty_attributes.SliderTickRate;
-
+        if (std::isnan(beatmap_.difficulty_attributes.ApproachRate))
+            beatmap_.difficulty_attributes.ApproachRate = beatmap_.difficulty_attributes.OverallDifficulty;
     }
 
     void parse_timing_points(std::string_view first_line)
@@ -324,9 +371,9 @@ inline void BeatmapParser::parse_section()
         CPPOSU_RAISE_PARSE_ERROR("Expected section start: " << debug_location(line));
 
     if(try_take_prefix(line, "[General]"))
-        beatmap_.general = parse_dict_section(line);
+        parse_general(line);
     else if (try_take_prefix(line, "[Metadata]"))
-        beatmap_.metadata = parse_dict_section(line);
+        parse_metadata(line);
     else if (try_take_prefix(line, "[Difficulty]"))
         parse_difficulty(line);
     else if (try_take_prefix(line, "[TimingPoints]"))

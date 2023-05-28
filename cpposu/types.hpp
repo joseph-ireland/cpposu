@@ -21,12 +21,37 @@ enum HitObjectType : int
 
     slider_head,
     slider_tick,
+    slider_repeat,
     slider_legacy_last_tick,
     slider_tail,
 
     spinner_start,
     spinner_end,
 };
+
+inline bool is_start_event(HitObjectType t)
+{
+    switch(t)
+    {
+        case circle:
+        case slider_head:
+        case spinner_start:
+            return true;
+        default:
+            return false;
+    }
+}
+inline bool is_target_circle(HitObjectType t)
+{
+    switch(t)
+    {
+        case circle:
+        case slider_head:
+            return true;
+        default:
+            return false;
+    }
+}
 struct Vector2 {
     float X,Y;
 
@@ -34,7 +59,7 @@ struct Vector2 {
     Vector2 operator+(Vector2 b) const { return {X+b.X, Y+b.Y}; }
     Vector2 operator-(Vector2 b) const { return {X-b.X, Y-b.Y}; }
     Vector2 operator/(float a) const { return {X/a, Y/a}; }
-    Vector2 operator*(float a) const  { return {a*X, a*Y}; }
+    Vector2 operator*(float a) const  { return {X*a, Y*a}; }
     Vector2 operator+=(Vector2 a) { *this = *this + a; return *this;}
     Vector2 operator-=(Vector2 a) { *this = *this - a; return *this;}
 
@@ -42,7 +67,7 @@ struct Vector2 {
     friend Vector2 lerp(Vector2 a, Vector2 b, float t) { return (1-t)*a + t*b; }
 
     float squared_length() { return X*X+Y*Y; }
-    float length() { return std::sqrtf(squared_length()); }
+    float length() { return std::sqrt((double) squared_length()); }
 
     float dot(const Vector2& other) { return X*other.X + Y*other.Y; }
 
@@ -56,6 +81,7 @@ constexpr const char* to_string(HitObjectType h)
     case HitObjectType::circle: return "circle";
     case HitObjectType::slider_head: return "slider_head";
     case HitObjectType::slider_tick: return "slider_tick";
+    case HitObjectType::slider_repeat: return "slider_repeat";
     case HitObjectType::slider_legacy_last_tick: return "slider_legacy_last_tick";
     case HitObjectType::slider_tail: return "slider_tail";
     case HitObjectType::spinner_start: return "spinner_start";
@@ -71,12 +97,49 @@ inline std::ostream& operator<<(std::ostream& os, HitObjectType h)
 
 struct MapDifficultyAttributes
 {
-    double HPDrainRate;
-    double CircleSize;
-    double OverallDifficulty;
-    double ApproachRate;
-    double SliderMultiplier;
-    double SliderTickRate;
+    float HPDrainRate=5;
+    float CircleSize=5;
+    float OverallDifficulty=5;
+    float ApproachRate=NAN;
+    double SliderMultiplier=1;
+    double SliderTickRate=1;
+};
+inline double difficulty_range(double difficulty, double min, double mid, double max)
+{
+    if (difficulty > 5)
+        return mid + (max - mid) * (difficulty - 5) / 5;
+    if (difficulty < 5)
+        return mid - (mid - min) * (5 - difficulty) / 5;
+
+    return mid;
+}
+struct BeatmapInfo
+{
+    std::string AudioFilename;
+    double AudioLeadIn;
+    double PreviewTime;
+    std::string SampleSet;
+    int SampleVolume;
+    float StackLeniency=0.7;
+    int Mode;
+    bool LetterboxInBreaks;
+    bool SpecialStyle;
+    bool WidescreenStoryboard;
+    bool EpilepsyWarning;
+    bool SamplesMatchPlaybackRate;
+    int Countdown;
+    int CountdownOffset;
+    std::string Title;
+    std::string TitleUnicode;
+    std::string Artist;
+    std::string ArtistUnicode;
+    std::string Creator;
+    std::string Version;
+    std::string Source;
+    std::string Tags;
+    uint64_t BeatmapID;
+    uint64_t BeatmapSetID;
+
 };
 
 struct TimingPoint
@@ -174,8 +237,8 @@ struct Beatmap
     static constexpr int FIRST_LAZER_VERSION = 128;
     int version;
 
-    std::optional<std::unordered_map<std::string, std::string>> general, metadata;
-    MapDifficultyAttributes difficulty_attributes;
+    BeatmapInfo info{};
+    MapDifficultyAttributes difficulty_attributes{};
     TimingPoints timing_points;
     std::vector<HitObject> hit_objects;
 };

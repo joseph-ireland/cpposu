@@ -1,5 +1,6 @@
 
 #include <cpposu/beatmap_parser.hpp>
+#include <cpposu/mods.hpp>
 #include <exception>
 
 #ifdef _WIN32
@@ -28,6 +29,18 @@ CPPOSU_DLL void cpposu_free_beatmap(void* handle)
 {
     auto* beatmap = static_cast<cpposu::Beatmap*>(handle);
     delete beatmap;
+}
+
+CPPOSU_DLL void* cpposu_copy_beatmap(void* handle)
+{
+    auto* beatmap = static_cast<cpposu::Beatmap*>(handle);
+    return (void*) new cpposu::Beatmap(*beatmap);
+}
+
+CPPOSU_DLL void cpposu_apply_stacking(void* handle)
+{
+    auto* beatmap = static_cast<cpposu::Beatmap*>(handle);
+    cpposu::apply_stacking(*beatmap);
 }
 
 CPPOSU_DLL void cpposu_hit_objects(void* handle, void** data, int* size)
