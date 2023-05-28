@@ -115,8 +115,10 @@ struct Slider
             for (int i=1; i<ticks.size(); ++i)
             {
                 double time = slide_start + ticks[i].time;
-                if (i!=ticks.size()-1 || repeat!=data.slide_count-1)
+                if (i!=ticks.size()-1 )
                     on_event(make_hit_object( HitObjectType::slider_tick, i, time));
+                else if (repeat!=data.slide_count-1)
+                    on_event(make_hit_object( HitObjectType::slider_repeat, i, time));
                 else
                 {
                     on_event(make_legacy_last_tick_object(slide_start + ticks[i-1].time));
@@ -130,8 +132,10 @@ struct Slider
                 for (int i=ticks.size()-2; i>=0; --i)
                 {
                     double time = slide_end - ticks[i].time;
-                    if (i!=0 || repeat+1!=data.slide_count-1)
+                    if (i!=0 )
                         on_event(make_hit_object( HitObjectType::slider_tick, i, time));
+                    else if (repeat+1!=data.slide_count-1)
+                        on_event(make_hit_object( HitObjectType::slider_repeat, i, time));
                     else
                     {
                         on_event(make_legacy_last_tick_object(slide_end - ticks[1].time));
@@ -206,6 +210,7 @@ private:
                     begin=next;
             }
         }
+        if (path.front() != Vector2{0,0}) path.insert(path.begin(), Vector2{0,0});
     }
 
     void calculate_distances()

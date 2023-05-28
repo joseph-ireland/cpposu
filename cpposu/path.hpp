@@ -277,7 +277,7 @@ namespace cpposu
             Vector2 c = controlPoints[2].position;
 
             // If we have a degenerate triangle where a side-length is almost zero, then give up and fallback to a more numerically stable method.
-            if (std::abs((b.Y - a.Y) * (c.X - a.X) - (b.X - a.X) * (c.Y - a.Y)) < 1e-8)
+            if (std::abs((b.Y - a.Y) * (c.X - a.X) - (b.X - a.X) * (c.Y - a.Y)) < 1e-3f)
             {
                 return {};
             }
